@@ -400,8 +400,9 @@ class LocalAuthenticator(Authenticator):
             if self.create_system_users:
                 yield gen.maybe_future(self.add_system_user(user))
             else:
-                raise KeyError("User %s does not exist." % user.name)
-
+                # No. Please. We're in production and have no control over the external ldap.
+                # raise KeyError("User %s does not exist." % user.name)
+                self.log.critical("\nAHHHH!!!!!!!!!!! User %s doesn't exist!?", user.name)
         yield gen.maybe_future(super().add_user(user))
 
     @staticmethod
