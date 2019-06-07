@@ -52,6 +52,18 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.options import define, options, parse_command_line
 
 
+# probably load from file. Have z2jh serialize on config load and pass file path to script cmd str
+# TODO: Move to __main__ ? Still not sure to to reconsile with existing config data
+# path to target config data in the service dict exposed via the API
+server_session_id_path: ["state","image"],
+# Let's use a 0 for unlimted for flexibility. I was going to use None, but that'll probably end poorly
+session_timeout_map: {
+    "minimal": {"max_age": 0, "idle_timeout": 32000},
+    "datascience": {"max_age": 0, "idle_timeout": 18000},
+    "tensorflow-gpu": {"max_age": 7200, "idle_timeout": 0}
+}
+
+
 def parse_date(date_string):
     """Parse a timestamp
 
@@ -116,6 +128,37 @@ def cull_idle(
     users = json.loads(resp.body.decode('utf8', 'replace'))
     futures = []
 
+
+    @coroutine
+    def get_timeout_config(server):
+        """identify server session and return apropriate tmeout data
+
+        Returns (max_age, inactive_limit) tuple
+        """
+
+        # Load the default data
+        session_id = server
+        session_max_age = max_age
+        session_inactive_limit = inactive_limit
+
+        try:
+            for key in server_session_id_path:
+                session_id = session_id[key]
+        except KeyError:
+            # FIXME: Warning? Debug? Error?
+            app_log.info("Could not index server data to identify server session, using default timeouts")
+        else:
+            # Try to load the config data for this session id, fallback to defaults
+            session_config = session_timeout_map.get(session_id, {})
+            if session_config:
+                session_max_age = session_config.get('max_age', max_age)
+                session_inactive_limit = session_config.get('inactive_limit', inactive_limit)
+            else:
+                # FIXME: This could print A LOT over time, even if you'rer relying on defaults. Move to debug?
+                app_log.info("No configuration for session id '%s', using defualts", session_id)
+        return (session_max_age, session_inactive_limit)
+
+
     @coroutine
     def handle_server(user, server_name, server):
         """Handle (maybe) culling a single server
@@ -161,6 +204,8 @@ def cull_idle(
             # which introduces the 'started' field which is never None
             # for running servers
             inactive = age
+
+        session_max_age, session_inactive_limit = get_timeout_config(server)
 
         should_cull = (
             inactive is not None and inactive.total_seconds() >= inactive_limit
