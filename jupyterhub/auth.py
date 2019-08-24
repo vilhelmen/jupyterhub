@@ -989,10 +989,25 @@ class DummyAuthenticator(Authenticator):
         """,
     )
 
+    admin_password = Unicode(
+        config=True,
+        help="""
+        Set a global password for admin accounts. This password must be set to enable admin login.
+
+        This allows admins with any username to log in with the same static password.
+        """,
+    )
+
     async def authenticate(self, handler, data):
-        """Checks against a global password if it's been set. If not, allow any user/pass combo"""
+        """Checks global passwords for user/admin logins"""
+        login_state = {'name': data['username'], 'admin': False}
+
+        if self.admin_password and data['password'] == self.admin_password and data['password'] != self.password:
+            login_state['admin'] = True
+            return login_state
+
         if self.password:
-            if data['password'] == self.password:
-                return data['username']
-            return None
-        return data['username']
+            if data['password'] != self.password:
+                login_state = None
+
+        return login_state
